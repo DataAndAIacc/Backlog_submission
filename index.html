@@ -463,43 +463,30 @@ function TicketForm() {
 
 // ── LOGIN SCREEN ──────────────────────────────────────────────────
 function LoginScreen({ onLogin }) {
-  const [step,    setStep]    = useState('email');
+  const [mode,    setMode]    = useState('signin'); // signin | signup
   const [email,   setEmail]   = useState('');
-  const [code,    setCode]    = useState('');
-  const [msg,     setMsg]     = useState('');
+  const [password,setPassword]= useState('');
+  const [confirm, setConfirm] = useState('');
   const [err,     setErr]     = useState('');
   const [loading, setLoading] = useState(false);
 
-  async function sendCode() {
+  async function handle() {
     const e = email.trim().toLowerCase();
     if (!e.endsWith('@accenture.com')) { setErr('Only @accenture.com addresses are allowed.'); return; }
+    if (password.length < 8) { setErr('Password must be at least 8 characters.'); return; }
+    if (mode === 'signup' && password !== confirm) { setErr('Passwords do not match.'); return; }
     setLoading(true); setErr('');
-    const { error } = await supabaseClient.auth.signInWithOtp({ email: e });
-    if (error) { setErr('Could not send code. Please try again.'); }
-    else { setStep('code'); setMsg(`Code sent to ${e}`); }
-    setLoading(false);
-  }
-
-  async function verifyCode() {
-    setLoading(true); setErr('');
-    const e = email.trim().toLowerCase();
-    const t = code.trim();
-    let lastErr = null;
-    for (const type of ['email', 'recovery', 'magiclink']) {
-      const { error } = await supabaseClient.auth.verifyOtp({ email: e, token: t, type });
-      if (!error) {
-        for (let i = 0; i < 20; i++) {
-          const { data: { session } } = await supabaseClient.auth.getSession();
-          if (session) { onLogin(session); return; }
-          await new Promise(r => setTimeout(r, 500));
-        }
-        setErr('Verification timed out — please request a new code.');
-        setLoading(false);
-        return;
-      }
-      lastErr = error;
+    if (mode === 'signup') {
+      const { error } = await supabaseClient.auth.signUp({ email: e, password });
+      if (error) { setErr(error.message); setLoading(false); return; }
     }
-    setErr(lastErr?.message || 'Invalid or expired code.');
+    const { data, error } = await supabaseClient.auth.signInWithPassword({ email: e, password });
+    if (error) {
+      setErr(mode === 'signup' ? 'Account created — please sign in.' : 'Incorrect email or password.');
+      if (mode === 'signup') setMode('signin');
+      setLoading(false); return;
+    }
+    if (data.session) onLogin(data.session);
     setLoading(false);
   }
 
@@ -508,40 +495,36 @@ function LoginScreen({ onLogin }) {
     <div style={{ maxWidth:400, margin:'80px auto', padding:'0 1rem' }}>
       <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:20 }}>
         <div style={{ width:32, height:32, borderRadius:8, background:'#EEEDFE', display:'flex', alignItems:'center', justifyContent:'center', fontSize:18 }}>🎫</div>
-        <h1 style={{ fontSize:20, fontWeight:500 }}>Backlog Of Data And AI Proposals For Rolls Royce Account</h1>
+        <h1 style={{ fontSize:18, fontWeight:500 }}>Backlog Of Data And AI Proposals For Rolls Royce Account</h1>
       </div>
       <div style={cardStyle}>
-        {step === 'email' ? (
-          <>
-            <Field label="Accenture email" required help="@accenture.com addresses only">
-              <input style={iS} type="email" value={email} onChange={e=>setEmail(e.target.value)}
-                placeholder="you@accenture.com" autoComplete="email"
-                onKeyDown={e=>e.key==='Enter'&&sendCode()} />
-            </Field>
-            {err && <p style={{ color:'#D85A30', fontSize:13, marginBottom:12 }}>{err}</p>}
-            <button className="primary" onClick={sendCode} disabled={loading||!email} style={{ width:'100%' }}>
-              {loading ? 'Sending…' : 'Send sign-in code →'}
-            </button>
-          </>
-        ) : (
-          <>
-            <p style={{ fontSize:13, color:'#666', marginBottom:16 }}>{msg}</p>
-            <Field label="Sign-in code" required>
-              <input style={{ ...iS, fontSize:24, letterSpacing:6, textAlign:'center' }}
-                type="text" inputMode="numeric" value={code} onChange={e=>setCode(e.target.value)}
-                placeholder="········" autoComplete="one-time-code"
-                onKeyDown={e=>e.key==='Enter'&&verifyCode()} />
-            </Field>
-            {err && <p style={{ color:'#D85A30', fontSize:13, marginBottom:12 }}>{err}</p>}
-            <button className="primary" onClick={verifyCode} disabled={loading||code.length<4} style={{ width:'100%' }}>
-              {loading ? 'Verifying…' : 'Sign in →'}
-            </button>
-            <button onClick={()=>{ setStep('email'); setCode(''); setErr(''); }}
-              style={{ width:'100%', marginTop:8, background:'none', border:'none', color:'#888', fontSize:13, cursor:'pointer' }}>
-              Use a different email
-            </button>
-          </>
+        <p style={{ fontSize:13, color:'#888', marginBottom:16 }}>
+          {mode === 'signin' ? 'Sign in with your Accenture email.' : 'Create an account with your Accenture email.'}
+        </p>
+        <Field label="Accenture email" required>
+          <input style={iS} type="email" value={email} onChange={e=>setEmail(e.target.value)}
+            placeholder="you@accenture.com" autoComplete="email"
+            onKeyDown={e=>e.key==='Enter'&&document.getElementById('pwField').focus()} />
+        </Field>
+        <Field label="Password" required help={mode==='signup'?'At least 8 characters':undefined}>
+          <input id="pwField" style={iS} type="password" value={password} onChange={e=>setPassword(e.target.value)}
+            autoComplete={mode==='signup'?'new-password':'current-password'}
+            onKeyDown={e=>e.key==='Enter'&&handle()} />
+        </Field>
+        {mode === 'signup' && (
+          <Field label="Confirm password" required>
+            <input style={iS} type="password" value={confirm} onChange={e=>setConfirm(e.target.value)}
+              autoComplete="new-password" onKeyDown={e=>e.key==='Enter'&&handle()} />
+          </Field>
         )}
+        {err && <p style={{ color:'#D85A30', fontSize:13, marginBottom:12 }}>{err}</p>}
+        <button className="primary" onClick={handle} disabled={loading||!email||!password} style={{ width:'100%' }}>
+          {loading ? (mode==='signup'?'Creating…':'Signing in…') : (mode==='signin'?'Sign in →':'Create account →')}
+        </button>
+        <button onClick={()=>{setMode(m=>m==='signin'?'signup':'signin');setErr('');}}
+          style={{ width:'100%', marginTop:8, background:'none', border:'none', color:'#888', fontSize:13, cursor:'pointer' }}>
+          {mode === 'signin' ? 'New here? Create an account' : 'Already have an account? Sign in'}
+        </button>
       </div>
     </div>
   );
